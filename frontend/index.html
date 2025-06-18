@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenTelemetry Todos</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Login Form -->
+        <div id="authContainer">
+            <h2>Login</h2>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" required>
+                </div>
+                <button type="submit" class="btn">Login</button>
+                <p>Don't have an account? <a href="#" id="showRegister">Register here</a></p>
+            </form>
+        </div>
+
+        <!-- Register Form -->
+        <div id="registerContainer" class="hidden">
+            <h2>Register</h2>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label for="regUsername">Username:</label>
+                    <input type="text" id="regUsername" required>
+                </div>
+                <div class="form-group">
+                    <label for="regEmail">Email:</label>
+                    <input type="email" id="regEmail" required>
+                </div>
+                <div class="form-group">
+                    <label for="regPassword">Password:</label>
+                    <input type="password" id="regPassword" required>
+                </div>
+                <button type="submit" class="btn">Register</button>
+                <p>Already have an account? <a href="#" id="showLogin">Login here</a></p>
+            </form>
+        </div>
+
+        <!-- Todo Section -->
+        <div id="todoContainer" class="hidden">
+            <div class="header-section">
+                <h1>Todo List</h1>
+                <button onclick="logout()" class="btn" style="float: right;">Logout</button>
+            </div>
+
+            <!-- Todo Creation Form -->
+            <form id="todoForm">
+                <div class="form-group">
+                    <label for="todoName">Task Name:</label>
+                    <input type="text" id="todoName" required>
+                </div>
+                <div class="form-group">
+                    <label for="todoDescription">Description:</label>
+                    <textarea id="todoDescription"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="todoDueDate">Due Date:</label>
+                    <input type="text" id="todoDueDate">
+                </div>
+                <div class="form-group">
+                    <label for="todoReminderDate">Reminder Date:</label>
+                    <input type="text" id="todoReminderDate">
+                </div>
+                <div class="form-group">
+                    <label for="todoPriority">Priority:</label>
+                    <select id="todoPriority">
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn">Add Todo</button>
+            </form>
+
+            <!-- Todos Table -->
+            <table id="todosTable">
+                <thead>
+                    <tr>
+                        <th>Task</th>
+                        <th>Description</th>
+                        <th>Due Date</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="todosBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Load our app code as a module -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

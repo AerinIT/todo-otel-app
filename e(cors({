@@ -1,0 +1,688 @@
+[1mdiff --git auth-service.ts auth-service.ts[m
+[1mindex 86b1138..4bb2090 100644[m
+[1m--- auth-service.ts[m
+[1m+++ auth-service.ts[m
+[36m@@ -35,10 +35,10 @@[m [mconst app = express();[m
+ [m
+ // CORS middleware must be first[m
+ app.use(cors({[m
+[31m-  origin: ['http://localhost:8082', 'http://127.0.0.1:8082'],[m
+[32m+[m[32m  origin: ['http://localhost:8082', 'http://127.0.0.1:8082', 'http://localhost:8080'],[m
+   credentials: true,[m
+   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],[m
+[31m-  allowedHeaders: ['Content-Type', 'Authorization', 'traceparent', 'tracestate'][m
+[32m+[m[32m  allowedHeaders: ['Content-Type', 'Authorization', 'traceparent', 'tracestate', 'baggage'][m
+ }));[m
+ [m
+ // Other middleware[m
+[36m@@ -251,25 +251,31 @@[m [mapp.post('/auth/login', async (req, res) => {[m
+   authAttempts.add(1);[m
+   [m
+   try {[m
+[32m+[m[32m    console.log('Login attempt received:', { username: req.body.username });[m
+     const { username, password } = req.body;[m
+ [m
+     if (!username || !password) {[m
+[32m+[m[32m      console.log('Missing credentials:', { username: !!username, password: !!password });[m
+       span.setAttribute('auth.login.status', 'invalid_input');[m
+       span.end();[m
+       return res.status(400).json({ error: 'Missing credentials' });[m
+     }[m
+ [m
+     // Find user[m
+[32m+[m[32m    console.log('Finding user:', { username });[m
+     const user = await User.findOne({ username }) as IUser;[m
+     if (!user) {[m
+[32m+[m[32m      console.log('User not found:', { username });[m
+       span.setAttribute('auth.login.status', 'user_not_found');[m
+       span.end();[m
+       return res.status(401).json({ error: 'Invalid credentials' });[m
+     }[m
+ [m
+     // Check password[m
+[32m+[m[32m    console.log('Checking password for user:', { username });[m
+     const isValidPassword = await user.comparePassword(password);[m
+     if (!isValidPassword) {[m
+[32m+[m[32m      console.log('Invalid password for user:', { username });[m
+       span.setAttribute('auth.login.status', 'invalid_password');[m
+       span.end();[m
+ [m
+[36m@@ -285,6 +291,7 @@[m [mapp.post('/auth/login', async (req, res) => {[m
+       return res.status(401).json({ error: 'Invalid credentials' });[m
+     }[m
+ [m
+[32m+[m[32m    console.log('Login successful, generating token for user:', { username });[m
+     // Generate JWT token[m
+     const token = jwt.sign([m
+       { userId: user._id },[m
+[36m@@ -305,6 +312,7 @@[m [mapp.post('/auth/login', async (req, res) => {[m
+       }[m
+     });[m
+ [m
+[32m+[m[32m    console.log('Sending successful login response for user:', { username });[m
+     res.json({ token, user: { username: user.username, email: user.email } });[m
+   } catch (error: any) {[m
+     logger?.emit({[m
+[1mdiff --git frontend/Dockerfile frontend/Dockerfile[m
+[1mindex 7ab4f30..77903ad 100644[m
+[1m--- frontend/Dockerfile[m
+[1m+++ frontend/Dockerfile[m
+[36m@@ -1,3 +1,24 @@[m
+[32m+[m[32m# Build stage[m
+[32m+[m[32mFROM node:16 AS builder[m
+[32m+[m
+[32m+[m[32mWORKDIR /app[m
+[32m+[m
+[32m+[m[32m# Copy package files[m
+[32m+[m[32mCOPY package*.json ./[m
+[32m+[m
+[32m+[m[32m# Install dependencies[m
+[32m+[m[32mRUN npm install[m
+[32m+[m
+[32m+[m[32m# Copy source files[m
+[32m+[m[32mCOPY . .[m
+[32m+[m
+[32m+[m[32m# Create dist directory[m
+[32m+[m[32mRUN mkdir -p dist[m
+[32m+[m
+[32m+[m[32m# Build the application[m
+[32m+[m[32mRUN node build.js[m
+[32m+[m
+[32m+[m[32m# Production stage[m
+ FROM nginx:alpine[m
+ [m
+ # Create directory for our app[m
+[36m@@ -6,8 +27,11 @@[m [mWORKDIR /usr/share/nginx/html[m
+ # Copy nginx configuration[m
+ COPY nginx.conf /etc/nginx/conf.d/default.conf[m
+ [m
+[31m-# Copy static files[m
+[31m-COPY . .[m
+[32m+[m[32m# Copy built files from builder stage[m
+[32m+[m[32mCOPY --from=builder /app/dist /usr/share/nginx/html/dist[m
+[32m+[m[32mCOPY index.html /usr/share/nginx/html/[m
+[32m+[m[32mCOPY styles.css /usr/share/nginx/html/[m
+[32m+[m[32mCOPY favicon.ico /usr/share/nginx/html/[m
+ [m
+ EXPOSE 80[m
+ [m
+[1mdiff --git frontend/app.js frontend/app.js[m
+[1mindex 814fd24..490fc75 100644[m
+[1m--- frontend/app.js[m
+[1m+++ frontend/app.js[m
+[36m@@ -1,5 +1,6 @@[m
+[31m-import { initializeFaro, getWebInstrumentations } from 'https://esm.sh/@grafana/faro-web-sdk@1.3.5';[m
+[31m-import { TracingInstrumentation } from 'https://esm.sh/@grafana/faro-web-tracing@1.3.5';[m
+[32m+[m[32mimport { initializeFaro, getWebInstrumentations } from 'https://unpkg.com/@grafana/faro-web-sdk@1.3.5/dist/esm/index.js';[m
+[32m+[m[32mimport { TracingInstrumentation } from 'https://unpkg.com/@grafana/faro-web-tracing@1.3.5/dist/esm/index.js';[m
+[32m+[m[32mimport { propagation } from 'https://unpkg.com/@opentelemetry/api@1.3.5/build/esm/index.js';[m
+ [m
+ // Initialize Faro with web instrumentations and tracing[m
+ const faro = initializeFaro({[m
+[36m@@ -21,7 +22,7 @@[m [mconst faro = initializeFaro({[m
+ // Get OTel trace and context APIs[m
+ const { trace, context } = faro.api.getOTEL();[m
+ [m
+[31m-// API URLs[m
+[32m+[m[32m// API URLs - update these to match your environment[m
+ const AUTH_URL = 'http://localhost:8083';[m
+ const TODO_URL = 'http://localhost:8081';[m
+ [m
+[36m@@ -67,6 +68,61 @@[m [mfunction updateAuthState() {[m
+   }[m
+ }[m
+ [m
+[32m+[m[32m// Helper function to handle API errors[m
+[32m+[m[32masync function handleApiResponse(response, errorMessage = 'Operation failed') {[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const data = await response.json();[m
+[32m+[m[32m    if (!response.ok) {[m
+[32m+[m[32m      throw new Error(data.error || errorMessage);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    return data;[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    console.error('API Error:', error);[m
+[32m+[m[32m    throw error;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// Auth navigation[m
+[32m+[m[32mdocument.getElementById('showRegister').addEventListener('click', function(e) {[m
+[32m+[m[32m  e.preventDefault(); // Prevent the default anchor behavior[m
+[32m+[m[32m  const tracer = trace.getTracer('auth');[m
+[32m+[m[32m  const span = tracer.startSpan('show_register_form');[m
+[32m+[m[41m  [m
+[32m+[m[32m  try {[m
+[32m+[m[32m    document.getElementById('authContainer').classList.add('hidden');[m
+[32m+[m[32m    document.getElementById('registerContainer').classList.remove('hidden');[m
+[32m+[m[41m    [m
+[32m+[m[32m    span.setAttribute('navigation.action', 'show_register');[m
+[32m+[m[32m    span.setAttribute('navigation.success', true);[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    span.setAttribute('navigation.success', false);[m
+[32m+[m[32m    span.recordException(error);[m
+[32m+[m[32m    console.error('Navigation error:', error);[m
+[32m+[m[32m  } finally {[m
+[32m+[m[32m    span.end();[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[32m+[m
+[32m+[m[32mdocument.getElementById('showLogin').addEventListener('click', function(e) {[m
+[32m+[m[32m  e.preventDefault(); // Prevent the default anchor behavior[m
+[32m+[m[32m  const tracer = trace.getTracer('auth');[m
+[32m+[m[32m  const span = tracer.startSpan('show_login_form');[m
+[32m+[m[41m  [m
+[32m+[m[32m  try {[m
+[32m+[m[32m    document.getElementById('registerContainer').classList.add('hidden');[m
+[32m+[m[32m    document.getElementById('authContainer').classList.remove('hidden');[m
+[32m+[m[41m    [m
+[32m+[m[32m    span.setAttribute('navigation.action', 'show_login');[m
+[32m+[m[32m    span.setAttribute('navigation.success', true);[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    span.setAttribute('navigation.success', false);[m
+[32m+[m[32m    span.recordException(error);[m
+[32m+[m[32m    console.error('Navigation error:', error);[m
+[32m+[m[32m  } finally {[m
+[32m+[m[32m    span.end();[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[32m+[m
+ // Auth form handlers[m
+ document.getElementById('loginForm').addEventListener('submit', async (e) => {[m
+   e.preventDefault();[m
+[36m@@ -76,31 +132,44 @@[m [mdocument.getElementById('loginForm').addEventListener('submit', async (e) => {[m
+   try {[m
+     const username = document.getElementById('username').value;[m
+     const password = document.getElementById('password').value;[m
+[32m+[m[32m    console.log('Attempting login for user:', { username });[m
+ [m
+[31m-    const response = await fetch(`${AUTH_URL}/auth/login`, {[m
+[31m-      method: 'POST',[m
+[31m-      headers: { 'Content-Type': 'application/json' },[m
+[31m-      body: JSON.stringify({ username, password })[m
+[32m+[m[32m    const contextWithBaggage = await setRequestBaggage({[m
+[32m+[m[32m      'operation.name': { value: 'login' },[m
+[32m+[m[32m      'operation.timestamp': { value: new Date().toISOString() },[m
+[32m+[m[32m      'auth.username': { value: username }[m
+     });[m
+ [m
+[31m-    const data = await response.json();[m
+[31m-    if (response.ok) {[m
+[31m-      authToken = data.token;[m
+[31m-      currentUser = data.user;[m
+[31m-      localStorage.setItem('token', authToken);[m
+[31m-      localStorage.setItem('user', JSON.stringify(currentUser));[m
+[31m-      updateAuthState();[m
+[31m-      span.setAttribute('login.status', 'success');[m
+[31m-    } else {[m
+[31m-      alert(data.error);[m
+[31m-      span.setAttribute('login.status', 'failed');[m
+[31m-    }[m
+[32m+[m[32m    console.log('Sending login request to:', `${AUTH_URL}/auth/login`);[m
+[32m+[m[32m    const response = await context.with(contextWithBaggage, () =>[m
+[32m+[m[32m      fetch(`${AUTH_URL}/auth/login`, {[m
+[32m+[m[32m        method: 'POST',[m
+[32m+[m[32m        headers: {[m[41m [m
+[32m+[m[32m          'Content-Type': 'application/json',[m
+[32m+[m[32m          'Accept': 'application/json'[m
+[32m+[m[32m        },[m
+[32m+[m[32m        body: JSON.stringify({ username, password })[m
+[32m+[m[32m      })[m
+[32m+[m[32m    );[m
+[32m+[m
+[32m+[m[32m    console.log('Login response status:', response.status);[m
+[32m+[m[32m    const data = await handleApiResponse(response, 'Login failed');[m
+[32m+[m[32m    console.log('Login response data:', { success: !!data.token });[m
+[32m+[m[41m    [m
+[32m+[m[32m    authToken = data.token;[m
+[32m+[m[32m    currentUser = data.user;[m
+[32m+[m[32m    localStorage.setItem('token', authToken);[m
+[32m+[m[32m    localStorage.setItem('user', JSON.stringify(currentUser));[m
+[32m+[m[32m    updateAuthState();[m
+[32m+[m[32m    span.setAttribute('login.status', 'success');[m
+   } catch (error) {[m
+     console.error('Login error:', error);[m
+[31m-    alert('Error logging in');[m
+[32m+[m[32m    span.setAttribute('login.status', 'failed');[m
+     span.recordException(error);[m
+[32m+[m[32m    alert(error.message);[m
+[32m+[m[32m  } finally {[m
+[32m+[m[32m    span.end();[m
+   }[m
+[31m-  span.end();[m
+ });[m
+ [m
+ document.getElementById('registerForm').addEventListener('submit', async (e) => {[m
+[36m@@ -113,32 +182,71 @@[m [mdocument.getElementById('registerForm').addEventListener('submit', async (e) =>[m
+     const email = document.getElementById('regEmail').value;[m
+     const password = document.getElementById('regPassword').value;[m
+ [m
+[31m-    const response = await fetch(`${AUTH_URL}/auth/register`, {[m
+[31m-      method: 'POST',[m
+[31m-      headers: { 'Content-Type': 'application/json' },[m
+[31m-      body: JSON.stringify({ username, email, password })[m
+[32m+[m[32m    const contextWithBaggage = await setRequestBaggage({[m
+[32m+[m[32m      'operation.name': { value: 'register' },[m
+[32m+[m[32m      'operation.timestamp': { value: new Date().toISOString() },[m
+[32m+[m[32m      'auth.username': { value: username },[m
+[32m+[m[32m      'auth.email': { value: email }[m
+     });[m
+ [m
+[31m-    const data = await response.json();[m
+[31m-    if (response.ok) {[m
+[31m-      authToken = data.token;[m
+[31m-      currentUser = data.user;[m
+[31m-      localStorage.setItem('token', authToken);[m
+[31m-      localStorage.setItem('user', JSON.stringify(currentUser));[m
+[31m-      updateAuthState();[m
+[31m-      span.setAttribute('register.status', 'success');[m
+[31m-    } else {[m
+[31m-      alert(data.error);[m
+[31m-      span.setAttribute('register.status', 'failed');[m
+[31m-    }[m
+[32m+[m[32m    const response = await context.with(contextWithBaggage, () =>[m
+[32m+[m[32m      fetch(`${AUTH_URL}/auth/register`, {[m
+[32m+[m[32m        method: 'POST',[m
+[32m+[m[32m        headers: {[m[41m [m
+[32m+[m[32m          'Content-Type': 'application/json',[m
+[32m+[m[32m          'Accept': 'application/json'[m
+[32m+[m[32m        },[m
+[32m+[m[32m        body: JSON.stringify({ username, email, password })[m
+[32m+[m[32m      })[m
+[32m+[m[32m    );[m
+[32m+[m
+[32m+[m[32m    const data = await handleApiResponse(response, 'Registration failed');[m
+[32m+[m[32m    authToken = data.token;[m
+[32m+[m[32m    currentUser = data.user;[m
+[32m+[m[32m    localStorage.setItem('token', authToken);[m
+[32m+[m[32m    localStorage.setItem('user', JSON.stringify(currentUser));[m
+[32m+[m[32m    updateAuthState();[m
+[32m+[m[32m    span.setAttribute('register.status', 'success');[m
+   } catch (error) {[m
+[31m-    console.error('Registration error:', error);[m
+[31m-    alert('Error registering');[m
+[32m+[m[32m    span.setAttribute('register.status', 'failed');[m
+     span.recordException(error);[m
+[32m+[m[32m    alert(error.message);[m
+[32m+[m[32m  } finally {[m
+[32m+[m[32m    span.end();[m
+   }[m
+[31m-  span.end();[m
+ });[m
+ [m
+[32m+[m[32m// Helper function to set baggage for requests[m
+[32m+[m[32masync function setRequestBaggage(additionalBaggage = {}) {[m
+[32m+[m[32m  const tracer = trace.getTracer('baggage-helper');[m
+[32m+[m[32m  const span = tracer.startSpan('set-baggage');[m
+[32m+[m[41m  [m
+[32m+[m[32m  try {[m
+[32m+[m[32m    // Create base baggage with user info[m
+[32m+[m[32m    const baggageEntries = {[m
+[32m+[m[32m      'user.name': { value: currentUser?.username || 'anonymous' },[m
+[32m+[m[32m      'user.email': { value: currentUser?.email || 'unknown' },[m
+[32m+[m[32m      ...additionalBaggage[m
+[32m+[m[32m    };[m
+[32m+[m
+[32m+[m[32m    const baggage = propagation.createBaggage(baggageEntries);[m
+[32m+[m[32m    const contextWithBaggage = propagation.setBaggage(context.active(), baggage);[m
+[32m+[m[41m    [m
+[32m+[m[32m    span.setAttributes({[m
+[32m+[m[32m      'baggage.user.name': currentUser?.username,[m
+[32m+[m[32m      'baggage.user.email': currentUser?.email,[m
+[32m+[m[32m      ...Object.entries(additionalBaggage).reduce((acc, [key, { value }]) => {[m
+[32m+[m[32m        acc[`baggage.${key}`] = value;[m
+[32m+[m[32m        return acc;[m
+[32m+[m[32m      }, {})[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    return contextWithBaggage;[m
+[32m+[m[32m  } finally {[m
+[32m+[m[32m    span.end();[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+ // Todo form handler[m
+ document.getElementById('todoForm').addEventListener('submit', async (e) => {[m
+   e.preventDefault();[m
+[36m@@ -152,6 +260,15 @@[m [mdocument.getElementById('todoForm').addEventListener('submit', async (e) => {[m
+     const reminderDate = document.getElementById('todoReminderDate').value;[m
+     const priority = document.getElementById('todoPriority').value;[m
+ [m
+[32m+[m[32m    // Set baggage with todo information[m
+[32m+[m[32m    const contextWithBaggage = await setRequestBaggage({[m
+[32m+[m[32m      'todo.name': { value: name },[m
+[32m+[m[32m      'todo.priority': { value: priority },[m
+[32m+[m[32m      'todo.due_date': { value: dueDate || 'not_set' },[m
+[32m+[m[32m      'operation.name': { value: 'create_todo' },[m
+[32m+[m[32m      'operation.timestamp': { value: new Date().toISOString() }[m
+[32m+[m[32m    });[m
+[32m+[m
+     // Validate required fields[m
+     if (!name) {[m
+       alert('Todo name is required');[m
+[36m@@ -192,14 +309,16 @@[m [mdocument.getElementById('todoForm').addEventListener('submit', async (e) => {[m
+ [m
+     console.log('Sending todo data:', todoData);[m
+ [m
+[31m-    const response = await fetch(`${TODO_URL}/todos`, {[m
+[31m-      method: 'POST',[m
+[31m-      headers: {[m
+[31m-        'Content-Type': 'application/json',[m
+[31m-        'Authorization': `Bearer ${authToken}`[m
+[31m-      },[m
+[31m-      body: JSON.stringify(todoData)[m
+[31m-    });[m
+[32m+[m[32m    const response = await context.with(contextWithBaggage, () =>[m
+[32m+[m[32m      fetch(`${TODO_URL}/todos`, {[m
+[32m+[m[32m        method: 'POST',[m
+[32m+[m[32m        headers: {[m
+[32m+[m[32m          'Content-Type': 'application/json',[m
+[32m+[m[32m          'Authorization': `Bearer ${authToken}`[m
+[32m+[m[32m        },[m
+[32m+[m[32m        body: JSON.stringify(todoData)[m
+[32m+[m[32m      })[m
+[32m+[m[32m    );[m
+ [m
+     const data = await response.json();[m
+ [m
+[36m@@ -231,12 +350,19 @@[m [masync function fetchTodos() {[m
+   const span = tracer.startSpan('fetch_todos');[m
+ [m
+   try {[m
+[31m-    const response = await fetch(`${TODO_URL}/todos`, {[m
+[31m-      headers: {[m
+[31m-        'Authorization': `Bearer ${authToken}`[m
+[31m-      }[m
+[32m+[m[32m    const contextWithBaggage = await setRequestBaggage({[m
+[32m+[m[32m      'operation.name': { value: 'fetch_todos' },[m
+[32m+[m[32m      'operation.timestamp': { value: new Date().toISOString() }[m
+     });[m
+ [m
+[32m+[m[32m    const response = await context.with(contextWithBaggage, () =>[m[41m [m
+[32m+[m[32m      fetch(`${TODO_URL}/todos`, {[m
+[32m+[m[32m        headers: {[m
+[32m+[m[32m          'Authorization': `Bearer ${authToken}`[m
+[32m+[m[32m        }[m
+[32m+[m[32m      })[m
+[32m+[m[32m    );[m
+[32m+[m
+     if (response.ok) {[m
+       const data = await response.json();[m
+       const tbody = document.getElementById('todosBody');[m
+[36m@@ -282,15 +408,24 @@[m [mwindow.updateTodoStatus = async (todoId, completed) => {[m
+   const span = tracer.startSpan('update_todo');[m
+ [m
+   try {[m
+[31m-    const response = await fetch(`${TODO_URL}/todos/${todoId}`, {[m
+[31m-      method: 'PUT',[m
+[31m-      headers: {[m
+[31m-        'Content-Type': 'application/json',[m
+[31m-        'Authorization': `Bearer ${authToken}`[m
+[31m-      },[m
+[31m-      body: JSON.stringify({ completed })[m
+[32m+[m[32m    const contextWithBaggage = await setRequestBaggage({[m
+[32m+[m[32m      'todo.id': { value: todoId },[m
+[32m+[m[32m      'todo.completed': { value: completed.toString() },[m
+[32m+[m[32m      'operation.name': { value: 'update_todo' },[m
+[32m+[m[32m      'operation.timestamp': { value: new Date().toISOString() }[m
+     });[m
+ [m
+[32m+[m[32m    const response = await context.with(contextWithBaggage, () =>[m
+[32m+[m[32m      fetch(`${TODO_URL}/todos/${todoId}`, {[m
+[32m+[m[32m        method: 'PUT',[m
+[32m+[m[32m        headers: {[m
+[32m+[m[32m          'Content-Type': 'application/json',[m
+[32m+[m[32m          'Authorization': `Bearer ${authToken}`[m
+[32m+[m[32m        },[m
+[32m+[m[32m        body: JSON.stringify({ completed })[m
+[32m+[m[32m      })[m
+[32m+[m[32m    );[m
+[32m+[m
+     if (!response.ok) {[m
+       const data = await response.json();[m
+       alert(data.error);[m
+[36m@@ -311,13 +446,21 @@[m [mwindow.deleteTodo = async (todoId) => {[m
+ [m
+   if (confirm('Are you sure you want to delete this todo?')) {[m
+     try {[m
+[31m-      const response = await fetch(`${TODO_URL}/todos/${todoId}`, {[m
+[31m-        method: 'DELETE',[m
+[31m-        headers: {[m
+[31m-          'Authorization': `Bearer ${authToken}`[m
+[31m-        }[m
+[32m+[m[32m      const contextWithBaggage = await setRequestBaggage({[m
+[32m+[m[32m        'todo.id': { value: todoId },[m
+[32m+[m[32m        'operation.name': { value: 'delete_todo' },[m
+[32m+[m[32m        'operation.timestamp': { value: new Date().toISOString() }[m
+       });[m
+ [m
+[32m+[m[32m      const response = await context.with(contextWithBaggage, () =>[m
+[32m+[m[32m        fetch(`${TODO_URL}/todos/${todoId}`, {[m
+[32m+[m[32m          method: 'DELETE',[m
+[32m+[m[32m          headers: {[m
+[32m+[m[32m            'Authorization': `Bearer ${authToken}`[m
+[32m+[m[32m          }[m
+[32m+[m[32m        })[m
+[32m+[m[32m      );[m
+[32m+[m
+       if (response.ok) {[m
+         fetchTodos();[m
+       } else {[m
+[36m@@ -333,18 +476,5 @@[m [mwindow.deleteTodo = async (todoId) => {[m
+   span.end();[m
+ };[m
+ [m
+[31m-// Auth navigation[m
+[31m-document.getElementById('showRegister').addEventListener('click', (e) => {[m
+[31m-  e.preventDefault();[m
+[31m-  document.getElementById('authContainer').classList.add('hidden');[m
+[31m-  document.getElementById('registerContainer').classList.remove('hidden');[m
+[31m-});[m
+[31m-[m
+[31m-document.getElementById('showLogin').addEventListener('click', (e) => {[m
+[31m-  e.preventDefault();[m
+[31m-  document.getElementById('registerContainer').classList.add('hidden');[m
+[31m-  document.getElementById('authContainer').classList.remove('hidden');[m
+[31m-});[m
+[31m-[m
+ // Initialize app[m
+ updateAuthState();[m
+\ No newline at end of file[m
+[1mdiff --git frontend/index.html frontend/index.html[m
+[1mindex c131dba..9e37655 100644[m
+[1m--- frontend/index.html[m
+[1m+++ frontend/index.html[m
+[36m@@ -23,7 +23,7 @@[m
+                     <input type="password" id="password" required>[m
+                 </div>[m
+                 <button type="submit" class="btn">Login</button>[m
+[31m-                <p>Don't have an account? <a href="#" id="showRegister">Register here</a></p>[m
+[32m+[m[32m                <p>Don't have an account? <a href="#" id="showRegister" class="nav-link">Register here</a></p>[m
+             </form>[m
+         </div>[m
+ [m
+[36m@@ -44,7 +44,7 @@[m
+                     <input type="password" id="regPassword" required>[m
+                 </div>[m
+                 <button type="submit" class="btn">Register</button>[m
+[31m-                <p>Already have an account? <a href="#" id="showLogin">Login here</a></p>[m
+[32m+[m[32m                <p>Already have an account? <a href="#" id="showLogin" class="nav-link">Login here</a></p>[m
+             </form>[m
+         </div>[m
+ [m
+[36m@@ -102,8 +102,13 @@[m
+         </div>[m
+     </div>[m
+ [m
+[31m-    <!-- Load our app code as a module -->[m
+[31m-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>[m
+[31m-    <script type="module" src="app.js"></script>[m
+[32m+[m[32m    <!-- Load bundled JavaScript -->[m
+[32m+[m[32m    <script>[m
+[32m+[m[32m        window.onerror = function(msg, url, lineNo, columnNo, error) {[m
+[32m+[m[32m            console.error('Global error:', { msg, url, lineNo, columnNo, error });[m
+[32m+[m[32m            return false;[m
+[32m+[m[32m        };[m
+[32m+[m[32m    </script>[m
+[32m+[m[32m    <script type="module" src="dist/bundle.js" onerror="console.error('Failed to load bundle.js')"></script>[m
+ </body>[m
+ </html>[m
+\ No newline at end of file[m
+[1mdiff --git frontend/nginx.conf frontend/nginx.conf[m
+[1mindex 81475f1..37061da 100644[m
+[1m--- frontend/nginx.conf[m
+[1m+++ frontend/nginx.conf[m
+[36m@@ -27,17 +27,19 @@[m [mserver {[m
+         proxy_set_header Connection 'upgrade';[m
+         proxy_set_header Host $host;[m
+         proxy_cache_bypass $http_upgrade;[m
+[32m+[m[32m        proxy_set_header X-Real-IP $remote_addr;[m[41m[m
+[32m+[m[32m        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;[m[41m[m
+         [m
+         # CORS headers[m
+         add_header 'Access-Control-Allow-Origin' '*' always;[m
+         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;[m
+[31m-        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;[m
+[32m+[m[32m        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,traceparent,tracestate,baggage' always;[m[41m[m
+         add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;[m
+ [m
+         if ($request_method = 'OPTIONS') {[m
+             add_header 'Access-Control-Allow-Origin' '*';[m
+             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';[m
+[31m-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';[m
+[32m+[m[32m            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,traceparent,tracestate,baggage';[m[41m[m
+             add_header 'Access-Control-Max-Age' 1728000;[m
+             add_header 'Content-Type' 'text/plain; charset=utf-8';[m
+             add_header 'Content-Length' 0;[m
+[36m@@ -52,17 +54,19 @@[m [mserver {[m
+         proxy_set_header Connection 'upgrade';[m
+         proxy_set_header Host $host;[m
+         proxy_cache_bypass $http_upgrade;[m
+[32m+[m[32m        proxy_set_header X-Real-IP $remote_addr;[m[41m[m
+[32m+[m[32m        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;[m[41m[m
+         [m
+         # CORS headers[m
+         add_header 'Access-Control-Allow-Origin' '*' always;[m
+         add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;[m
+[31m-        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;[m
+[32m+[m[32m        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,traceparent,tracestate,baggage' always;[m[41m[m
+         add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;[m
+ [m
+         if ($request_method = 'OPTIONS') {[m
+             add_header 'Access-Control-Allow-Origin' '*';[m
+             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';[m
+[31m-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';[m
+[32m+[m[32m            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,traceparent,tracestate,baggage';[m[41m[m
+             add_header 'Access-Control-Max-Age' 1728000;[m
+             add_header 'Content-Type' 'text/plain; charset=utf-8';[m
+             add_header 'Content-Length' 0;[m
+[1mdiff --git frontend/styles.css frontend/styles.css[m
+[1mindex f690287..6f10b27 100644[m
+[1m--- frontend/styles.css[m
+[1m+++ frontend/styles.css[m
+[36m@@ -42,6 +42,17 @@[m [mbody {[m
+     background-color: #0056b3; [m
+ }[m
+ [m
+[32m+[m[32m.nav-link {[m[41m[m
+[32m+[m[32m    color: #007bff;[m[41m[m
+[32m+[m[32m    text-decoration: none;[m[41m[m
+[32m+[m[32m    cursor: pointer;[m[41m[m
+[32m+[m[32m}[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m.nav-link:hover {[m[41m[m
+[32m+[m[32m    text-decoration: underline;[m[41m[m
+[32m+[m[32m    color: #0056b3;[m[41m[m
+[32m+[m[32m}[m[41m[m
+[32m+[m[41m[m
+ table { [m
+     border-collapse: collapse; [m
+     width: 100%; [m
+[1mdiff --git todo-service.ts todo-service.ts[m
+[1mindex 3d9e8c4..f7fe66f 100644[m
+[1m--- todo-service.ts[m
+[1m+++ todo-service.ts[m
+[36m@@ -10,6 +10,7 @@[m [mimport schedule from 'node-schedule';[m
+ import Redis from 'ioredis';[m
+ import mongoose from 'mongoose';[m
+ import { context, propagation } from '@opentelemetry/api';[m
+[32m+[m[32mimport { setBaggageMiddleware, debugBaggageMiddleware } from './middleware/baggage';[m
+ [m
+ // Extend Express Request type[m
+ declare module 'express-serve-static-core' {[m
+[36m@@ -62,25 +63,20 @@[m [mapp.use(cors({[m
+   origin: ['http://localhost:8082', 'http://127.0.0.1:8082'],[m
+   credentials: true,[m
+   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],[m
+[31m-  allowedHeaders: ['Content-Type', 'Authorization', 'traceparent', 'tracestate'][m
+[32m+[m[32m  allowedHeaders: ['Content-Type', 'Authorization', 'traceparent', 'tracestate', 'baggage'][m
+ }));[m
+ [m
+ // Other middleware[m
+ app.use(express.json());[m
+ [m
+[31m-// Middleware to extract user from baggage[m
+[31m-app.use((_req: Request, _res: Response, next: NextFunction) => {[m
+[31m-  const activeContext = context.active();[m
+[31m-  const baggage = propagation.getBaggage(activeContext);[m
+[31m-  if (baggage) {[m
+[31m-    const userId = baggage.getEntry('user.id')?.value;[m
+[31m-    const userName = baggage.getEntry('user.name')?.value;[m
+[31m-    if (userId && userName) {[m
+[31m-      _req.baggageUser = { id: userId, name: userName };[m
+[31m-    }[m
+[31m-  }[m
+[31m-  next();[m
+[31m-});[m
+[32m+[m[32m// Debug middleware - logs baggage for all requests[m
+[32m+[m[32mapp.use(debugBaggageMiddleware);[m
+[32m+[m
+[32m+[m[32m// Auth middleware[m
+[32m+[m[32mapp.use(auth);[m
+[32m+[m
+[32m+[m[32m// Baggage middleware - sets user context in trace baggage[m
+[32m+[m[32mapp.use(setBaggageMiddleware);[m
+ [m
+ // Connect to MongoDB[m
+ connectDB().catch((error: Error) => {[m
+[36m@@ -133,13 +129,24 @@[m [mapp.get('/todos', auth, async (req: Request, res: Response) => {[m
+   try {[m
+     const userId = req.user.id;[m
+     const baggage = propagation.getBaggage(context.active());[m
+[31m-    const userName = baggage?.getEntry('user.name')?.value;[m
+[31m-    const userRole = baggage?.getEntry('user.role')?.value;[m
+[32m+[m[41m    [m
+[32m+[m[32m    // Log baggage content[m
+[32m+[m[32m    logger.emit({[m
+[32m+[m[32m      severityText: 'INFO',[m
+[32m+[m[32m      body: 'Baggage content in /todos endpoint',[m
+[32m+[m[32m      attributes: {[m
+[32m+[m[32m        'baggage.user.id': baggage?.getEntry('user.id')?.value,[m
+[32m+[m[32m        'baggage.user.name': baggage?.getEntry('user.name')?.value,[m
+[32m+[m[32m        'baggage.user.role': baggage?.getEntry('user.role')?.value[m
+[32m+[m[32m      }[m
+[32m+[m[32m    });[m
+ [m
+[32m+[m[32m    // Add baggage to span attributes[m
+     span.setAttributes({[m
+       'user.id': userId,[m
+[31m-      'user.name': userName || 'unknown',[m
+[31m-      'user.role': userRole || 'unknown'[m
+[32m+[m[32m      'user.name': baggage?.getEntry('user.name')?.value || 'unknown',[m
+[32m+[m[32m      'user.role': baggage?.getEntry('user.role')?.value || 'unknown',[m
+[32m+[m[32m      'baggage.present': baggage !== undefined,[m
+     });[m
+ [m
+     const todos = await Todo.find({ userId }).sort({ createdAt: -1 });[m
+[36m@@ -150,8 +157,9 @@[m [mapp.get('/todos', auth, async (req: Request, res: Response) => {[m
+     return res.json({ [m
+       todos, [m
+       user: { [m
+[31m-        username: userName || req.user.username, [m
+[31m-        userId [m
+[32m+[m[32m        username: baggage?.getEntry('user.name')?.value || req.user.username,[m
+[32m+[m[32m        userId,[m
+[32m+[m[32m        role: baggage?.getEntry('user.role')?.value || 'unknown'[m
+       } [m
+     });[m
+   } catch (error) {[m

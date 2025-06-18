@@ -1,0 +1,152 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      - MONGO_INITDB_DATABASE=todo-app
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d
+    command: ["mongod", "--bind_ip_all"]
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+
+  auth:
+    build: 
+      context: .
+      dockerfile: dockerfile.auth-service
+    container_name: auth
+    restart: unless-stopped
+    volumes:
+      - .:/usr/src/app:rw
+    ports:
+      - 8083:8080
+    environment:
+      - OTEL_LOG_LEVEL=ERROR
+      - NODE_ENV=production
+      - JWT_SECRET=your-secret-key-change-in-production
+      - MONGODB_URI=mongodb://mongodb:27017/todo-app
+      - PORT=8080
+    depends_on:
+      - mongodb
+
+  todo:
+    build: 
+      context: .
+      dockerfile: dockerfile.todo-service
+    container_name: todo
+    restart: unless-stopped
+    volumes:
+      - .:/usr/src/app:rw
+    ports:
+      - 8081:8080
+    environment:
+      - OTEL_LOG_LEVEL=ERROR
+      - NODE_ENV=production
+      - JWT_SECRET=your-secret-key-change-in-production
+      - MONGODB_URI=mongodb://mongodb:27017/todo-app
+      - PORT=8080
+    depends_on:
+      - mongodb
+      - redis
+      - auth
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    environment:
+      - NODE_ENV=production
+      - AUTH_URL=http://auth:8080
+      - TODO_URL=http://todo:8080
+    depends_on:
+      - auth
+      - todo
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: tempo
+    restart: unless-stopped
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    command: ["-config.file=/etc/tempo-config.yaml"]
+    volumes:
+      - "./tempo/tempo-config.yaml:/etc/tempo-config.yaml"
+
+  grafana:
+    image: grafana/grafana:11.6.2
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - "./grafana/provisioning:/etc/grafana/provisioning"
+      - "./grafana/grafana.ini:/etc/grafana/grafana.ini"
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_FEATURE_TOGGLES_ENABLE=flameGraph traceqlSearch traceQLStreaming correlations metricsSummary traceqlEditor traceToMetrics traceToProfiles datatrails
+      - GF_INSTALL_PLUGINS=grafana-lokiexplore-app,grafana-exploretraces-app
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+  mimir:
+    image: grafana/mimir:2.13.0
+    container_name: mimir
+    restart: unless-stopped
+    ports:
+      - "9009:9009"
+    volumes:
+      - ./mimir/mimir-config.yaml:/etc/mimir/mimir-config.yaml
+    command: [
+      "-ingester.native-histograms-ingestion-enabled=true",
+      "-config.file=/etc/mimir/mimir-config.yaml"
+    ]
+
+  alloy:
+    image: grafana/alloy:v1.3.1
+    container_name: alloy
+    restart: unless-stopped
+    ports:
+      - "12345:12345"
+      - "12346:12346"
+    volumes:
+      - "./alloy/config.alloy:/etc/alloy/config.alloy"
+      - "./alloy/endpoints.json:/etc/alloy/endpoints.json"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    command: [
+      "run",
+      "--server.http.listen-addr=0.0.0.0:12345",
+      "--stability.level=experimental",
+      "/etc/alloy/config.alloy"
+    ]
+
+  loki:
+    image: grafana/loki:3.2.0
+    container_name: loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml
+    command: ["--pattern-ingester.enabled=true", "-config.file=/etc/loki/local-config.yaml"]
+    environment:
+      - LOKI_VALIDATION_ALLOW_STRUCTURED_METADATA=true
+
+volumes:
+  mongodb_data:
+  redis_data:
