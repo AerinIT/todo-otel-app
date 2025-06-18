@@ -78,6 +78,16 @@ docker-compose up -d
    - Tempo: http://localhost:3200
 
 
+4. **Run K6 Script:**
+```bash
+docker run --network todo-otel-app_default -v $(pwd):/scripts -i grafana/k6 run /scripts/load-test.js
+```
+Our K6 Script is load-test.js 
+
+It creates User with 
+
+Username - 'testuser'
+Password - 'Test123!'
 
 
 ## Core Instrumentation Architecture
