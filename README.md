@@ -82,7 +82,7 @@ docker-compose up -d
 ```bash
 docker run --network todo-otel-app_default -v $(pwd):/scripts -i grafana/k6 run /scripts/load-test.js
 ```
-Our K6 Script is load-test.js 
+Our K6 Script file is `load-test.js` 
 
 It creates User with    
 
