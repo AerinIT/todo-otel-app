@@ -84,10 +84,10 @@ docker run --network todo-otel-app_default -v $(pwd):/scripts -i grafana/k6 run 
 ```
 Our K6 Script is load-test.js 
 
-It creates User with 
+It creates User with    
 
-Username - 'testuser'
-Password - 'Test123!'
+Username - `testuser`       
+Password - `Test123!`
 
 
 ## Core Instrumentation Architecture
