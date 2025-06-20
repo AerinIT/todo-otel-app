@@ -30,8 +30,8 @@ export const options = {
 };
 
 // Test data
-const AUTH_URL = 'http://206.198.144.25:8083/auth';
-const TODO_URL = 'http://206.198.144.25:8081/todos';
+const AUTH_URL = 'http://<YOUR-PUBLIC-IP>:8083/auth';
+const TODO_URL = 'http://<YOUR-PUBLIC-IP>:8081/todos';
 
 // Fixed test user credentials
 const TEST_USER = {
